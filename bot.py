@@ -1,9 +1,4 @@
-from aiohttp import (
-    ClientResponseError,
-    ClientSession,
-    ClientTimeout
-)
-from aiohttp_socks import ProxyConnector
+from aiohttp import ClientResponseError, ClientSession, ClientTimeout
 from fake_useragent import FakeUserAgent
 from datetime import datetime
 from colorama import *
@@ -33,20 +28,16 @@ class HahaWallet:
 
     def log(self, message):
         print(
-            f"{Fore.CYAN + Style.BRIGHT}[ {datetime.now().astimezone(wib).strftime('%x %X %Z')} ]{Style.RESET_ALL}"
-            f"{Fore.WHITE + Style.BRIGHT} | {Style.RESET_ALL}{message}",
+            f"{Fore.CYAN}[ {datetime.now().astimezone(wib).strftime('%x %X %Z')} ]"
+            f"{Fore.WHITE} | {message}{Style.RESET_ALL}",
             flush=True
         )
 
     def welcome(self):
-        print(
-            f"""
-        {Fore.GREEN + Style.BRIGHT}Auto Claim Karma {Fore.BLUE + Style.BRIGHT}Haha Wallet - BOT
-            """
-            f"""
-        {Fore.GREEN + Style.BRIGHT}Rey? {Fore.YELLOW + Style.BRIGHT}<INI WATERMARK>
-            """
-        )
+        print(f"""
+{Fore.GREEN}Auto Claim Karma {Fore.BLUE}Haha Wallet - BOT
+{Fore.GREEN}Rey? {Fore.YELLOW}<INI WATERMARK>
+        """)
 
     def format_seconds(self, seconds):
         hours, remainder = divmod(seconds, 3600)
@@ -56,576 +47,177 @@ class HahaWallet:
     def load_accounts(self):
         try:
             if not os.path.exists('accounts.json'):
-                self.log(f"{Fore.RED}File 'accounts.json' tidak ditemukan.{Style.RESET_ALL}")
-                return
-
-            with open('accounts.json', 'r') as file:
-                data = json.load(file)
-                if isinstance(data, list):
-                    return data
+                self.log(f"{Fore.RED}File 'accounts.json' not found")
                 return []
-        except json.JSONDecodeError:
+
+            with open('accounts.json') as f:
+                return json.load(f)
+        except Exception as e:
+            self.log(f"{Fore.RED}Error loading accounts: {e}")
             return []
         
-    async def load_proxies(self, use_proxy_choice: int):
-        filename = "proxy.txt"
+    async def load_proxies(self, choice: int):
         try:
-            if use_proxy_choice == 1:
-                async with ClientSession(timeout=ClientTimeout(total=30)) as session:
-                    async with session.get("https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/all.txt") as response:
-                        response.raise_for_status()
-                        content = await response.text()
-                        with open(filename, 'w') as f:
-                            f.write(content)
-                        self.proxies = content.splitlines()
+            if choice == 1:
+                async with ClientSession() as session:
+                    async with session.get("https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/all.txt") as res:
+                        self.proxies = (await res.text()).splitlines()
+                        with open("proxy.txt", "w") as f:
+                            f.write("\n".join(self.proxies))
             else:
-                if not os.path.exists(filename):
-                    self.log(f"{Fore.RED + Style.BRIGHT}File {filename} Not Found.{Style.RESET_ALL}")
-                    return
-                with open(filename, 'r') as f:
+                with open("proxy.txt") as f:
                     self.proxies = f.read().splitlines()
             
-            if not self.proxies:
-                self.log(f"{Fore.RED + Style.BRIGHT}No Proxies Found.{Style.RESET_ALL}")
-                return
-
-            self.log(
-                f"{Fore.GREEN + Style.BRIGHT}Proxies Total  : {Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT}{len(self.proxies)}{Style.RESET_ALL}"
-            )
+            self.log(f"{Fore.GREEN}Loaded {len(self.proxies)} proxies")
         
         except Exception as e:
-            self.log(f"{Fore.RED + Style.BRIGHT}Failed To Load Proxies: {e}{Style.RESET_ALL}")
+            self.log(f"{Fore.RED}Proxy error: {e}")
             self.proxies = []
 
-    def check_proxy_schemes(self, proxies):
-        schemes = ["http://", "https://", "socks4://", "socks5://"]
-        if any(proxies.startswith(scheme) for scheme in schemes):
-            return proxies
-        return f"http://{proxies}"
-
-    def get_next_proxy_for_account(self, account):
-        if account not in self.account_proxies:
-            if not self.proxies:
-                return None
-            proxy = self.check_proxy_schemes(self.proxies[self.proxy_index])
-            self.account_proxies[account] = proxy
-            self.proxy_index = (self.proxy_index + 1) % len(self.proxies)
-        return self.account_proxies[account]
-
-    def rotate_proxy_for_account(self, account):
+    def get_proxy(self, account):
         if not self.proxies:
             return None
-        proxy = self.check_proxy_schemes(self.proxies[self.proxy_index])
-        self.account_proxies[account] = proxy
-        self.proxy_index = (self.proxy_index + 1) % len(self.proxies)
+            
+        if account not in self.account_proxies:
+            proxy = self.proxies[self.proxy_index % len(self.proxies)]
+            self.account_proxies[account] = self.format_proxy(proxy)
+            self.proxy_index += 1
+            
+        return self.account_proxies[account]
+
+    def format_proxy(self, proxy):
+        if not proxy.startswith(("http://", "https://")):
+            return f"http://{proxy}"
         return proxy
     
-    def mask_account(self, account):
-        if "@" in account:
-            local, domain = account.split('@', 1)
-            mask_account = local[:3] + '*' * 3 + local[-3:]
-            return f"{mask_account}@{domain}"
-        
-    def print_question(self):
-        while True:
-            try:
-                print("1. Run With Monosans Proxy")
-                print("2. Run With Private Proxy")
-                print("3. Run Without Proxy")
-                choose = int(input("Choose [1/2/3] -> ").strip())
+    def mask_email(self, email):
+        user, domain = email.split('@', 1)
+        return f"{user[:3]}***{user[-3:]}@{domain}"
 
-                if choose in [1, 2, 3]:
-                    proxy_type = (
-                        "Run With Monosans Proxy" if choose == 1 else 
-                        "Run With Private Proxy" if choose == 2 else 
-                        "Run Without Proxy"
-                    )
-                    print(f"{Fore.GREEN + Style.BRIGHT}{proxy_type} Selected.{Style.RESET_ALL}")
-                    return choose
-                else:
-                    print(f"{Fore.RED + Style.BRIGHT}Please enter either 1, 2 or 3.{Style.RESET_ALL}")
-            except ValueError:
-                print(f"{Fore.RED + Style.BRIGHT}Invalid input. Enter a number (1, 2 or 3).{Style.RESET_ALL}")
-                
-    async def user_login(self, email: str, password: str, proxy=None):
+    async def user_login(self, email: str, pwd: str, proxy=None):
         url = "https://prod.haha.me/users/login"
-        data = json.dumps({"email":email, "password":password})
-        headers = {
-            **self.headers,
-            "Content-Length": str(len(data))
-        }
-        connector = ProxyConnector.from_url(proxy) if proxy else None
+        for _ in range(3):
+            try:
+                async with ClientSession() as session:
+                    async with session.post(
+                        url,
+                        headers=self.headers,
+                        json={"email": email, "password": pwd},
+                        proxy=proxy,
+                        timeout=ClientTimeout(60)
+                    ) as res:
+                        res.raise_for_status()
+                        return (await res.json())['id_token']
+            except Exception as e:
+                self.log(f"{Fore.RED}Login failed: {type(e).__name__}")
+                await asyncio.sleep(5)
+        return None
+
+    async def get_balance(self, token: str, proxy=None):
         try:
-            async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                async with session.post(url=url, headers=headers, data=data) as response:
-                    response.raise_for_status()
-                    result = await response.json()
-                    return result['id_token']
-        except (Exception, ClientResponseError) as e:
-            return self.log(
-                f"{Fore.CYAN+Style.BRIGHT}Status    :{Style.RESET_ALL}"
-                f"{Fore.RED+Style.BRIGHT} Login Failed {Style.RESET_ALL}"
-                f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
-                f"{Fore.YELLOW+Style.BRIGHT} {str(e)} {Style.RESET_ALL}"
-            )
-                
-    async def user_balance(self, token: str, proxy=None, retries=5):
-        url = "https://prod.haha.me/wallet-api/graphql"
-        data = json.dumps({
-            "operationName": None,
-            "variables": {},
-            "query": "{\n  getKarmaPoints\n}"
-        })
-        headers = {
-            **self.headers,
-            "Authorization": token,
-            "Content-Length": str(len(data))
-        }
-        for attempt in range(retries):
-            connector = ProxyConnector.from_url(proxy) if proxy else None
-            try:
-                async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.post(url=url, headers=headers, data=data) as response:
-                        response.raise_for_status()
-                        result = await response.json()
-                        return result['data']
-            except (Exception, ClientResponseError) as e:
-                if attempt < retries - 1:
-                    await asyncio.sleep(5)
-                    continue
-                
-                return None
-                
-    async def daily_checkin(self, token: str, proxy=None, retries=5):
-        url = "https://prod.haha.me/wallet-api/graphql"
-        data = json.dumps({
-            "operationName": None,
-            "variables":{
-                "timezone":"Asia/Jakarta"
-            },
-            "query": "query ($timezone: String) {\n  getDailyCheckIn(timezone: $timezone)\n}"
-        })
-        headers = {
-            **self.headers,
-            "Authorization": token,
-            "Content-Length": str(len(data))
-        }
-        for attempt in range(retries):
-            connector = ProxyConnector.from_url(proxy) if proxy else None
-            try:
-                async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.post(url=url, headers=headers, data=data) as response:
-                        response.raise_for_status()
-                        result = await response.json()
-                        return result['data']
-            except (Exception, ClientResponseError) as e:
-                if attempt < retries - 1:
-                    await asyncio.sleep(5)
-                    continue
-                
-                return None
-                
-    async def claim_checkin(self, token: str, proxy=None, retries=5):
-        url = "https://prod.haha.me/wallet-api/graphql"
-        data = json.dumps({
-            "operationName": None,
-            "variables":{
-                "timezone": "Asia/Jakarta"
-            },
-            "query": "mutation ($timezone: String) {\n  setDailyCheckIn(timezone: $timezone)\n}"
-        })
-        headers = {
-            **self.headers,
-            "Authorization": token,
-            "Content-Length": str(len(data))
-        }
-        for attempt in range(retries):
-            connector = ProxyConnector.from_url(proxy) if proxy else None
-            try:
-                async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.post(url=url, headers=headers, data=data) as response:
-                        response.raise_for_status()
-                        result = await response.json()
-                        return result['data']['setDailyCheckIn']
-            except (Exception, ClientResponseError) as e:
-                if attempt < retries - 1:
-                    await asyncio.sleep(5)
-                    continue
-                
-                return None
-            
-    async def basic_task_lists(self, token: str, proxy=None, retries=5):
-        url = "https://prod.haha.me/wallet-api/graphql"
-        data = json.dumps({
-            "operationName": None,
-            "variables": {},
-            "query": "{\n  getOnboarding {\n    show\n    expired\n    user_id\n    completed_all\n    completed_at\n    karma_available\n    karma_paid\n    karma_multiplier\n    max_transaction_perday\n    total_streaks_karma\n    redeemed_karma\n    tasks {\n      task_id\n      type\n      name\n      description\n      content\n      link\n      deeplink\n      completed\n      completed_at\n      karma_available\n      karma_paid\n      today_transactions\n      hide_after_completion\n      __typename\n    }\n    __typename\n  }\n}"
-        })
-        headers = {
-            **self.headers,
-            "Authorization": token,
-            "Content-Length": str(len(data))
-        }
-        for attempt in range(retries):
-            connector = ProxyConnector.from_url(proxy) if proxy else None
-            try:
-                async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.post(url=url, headers=headers, data=data) as response:
-                        response.raise_for_status()
-                        result = await response.json()
-                        return result['data']['getOnboarding']['tasks']
-            except (Exception, ClientResponseError) as e:
-                if attempt < retries - 1:
-                    await asyncio.sleep(5)
-                    continue
-                
-                return None
-                
-    async def claim_basic_tasks(self, token: str, task_id: int, proxy=None, retries=5):
-        url = "https://prod.haha.me/wallet-api/graphql"
-        data = json.dumps({
-            "operationName": None,
-            "variables": {
-                "task_id": task_id
-            },
-            "query": "mutation ($task_id: Int) {\n  setOnboarding(task_id: $task_id) {\n    task_id\n    success\n    completed_all\n    current_karma\n    __typename\n  }\n}"
-        })
+            async with ClientSession() as session:
+                async with session.post(
+                    "https://prod.haha.me/wallet-api/graphql",
+                    headers={**self.headers, "Authorization": token},
+                    json={"query": "{ getKarmaPoints }"},
+                    proxy=proxy,
+                    timeout=ClientTimeout(60)
+                ) as res:
+                    res.raise_for_status()
+                    return (await res.json())['data']['getKarmaPoints']
+        except Exception:
+            return "N/A"
+
+    async def handle_checkin(self, token: str, proxy=None):
+        try:
+            async with ClientSession() as session:
+                # Check checkin status
+                async with session.post(
+                    "https://prod.haha.me/wallet-api/graphql",
+                    headers={**self.headers, "Authorization": token},
+                    json={"query": "query { getDailyCheckIn(timezone: \"Asia/Jakarta\") }"},
+                    proxy=proxy,
+                    timeout=ClientTimeout(60)
+                ) as res:
+                    status = (await res.json())['data']['getDailyCheckIn']
+
+                if status:
+                    # Claim checkin
+                    async with session.post(
+                        "https://prod.haha.me/wallet-api/graphql",
+                        headers={**self.headers, "Authorization": token},
+                        json={"query": "mutation { setDailyCheckIn(timezone: \"Asia/Jakarta\") }"},
+                        proxy=proxy,
+                        timeout=ClientTimeout(60)
+                    ) as res:
+                        await res.json()
+                    return True
+                return False
+        except Exception:
+            return None
+
+    async def process_account(self, email: str, pwd: str, use_proxy: bool):
+        proxy = self.get_proxy(email) if use_proxy else None
+        masked_email = self.mask_email(email)
         
-        headers = {
-            **self.headers,
-            "Authorization": token,
-            "Content-Length": str(len(data))
-        }
-        for attempt in range(retries):
-            connector = ProxyConnector.from_url(proxy) if proxy else None
-            try:
-                async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.post(url=url, headers=headers, data=data) as response:
-                        response.raise_for_status()
-                        result = await response.json()
-                        return result['data']['setOnboarding']
-            except (Exception, ClientResponseError) as e:
-                if attempt < retries - 1:
-                    await asyncio.sleep(5)
-                    continue
-                
-                return None
-            
-    async def social_task_lists(self, token: str, proxy=None, retries=5):
-        url = "https://prod.haha.me/wallet-api/graphql"
-        data = json.dumps({
-            "operationName": None,
-            "variables": {},
-            "query": "{\n  getQuests {\n    name\n    title\n    description\n    haha_wallet_created\n    swap_count\n    swap_amount\n    app_open_count\n    status\n    disabled\n    karma_cost\n    karma_multiplier\n    karma_reward\n    tasks {\n      title\n      description\n      deeplink\n      completed\n      progress\n      progress_text\n      progress_total\n      amount\n      amount_total\n      task_id\n      task_type\n      content\n      __typename\n    }\n    __typename\n  }\n}"
-        })
-        headers = {
-            **self.headers,
-            "Authorization": token,
-            "Content-Length": str(len(data))
-        }
-        for attempt in range(retries):
-            connector = ProxyConnector.from_url(proxy) if proxy else None
-            try:
-                async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.post(url=url, headers=headers, data=data) as response:
-                        response.raise_for_status()
-                        result = await response.json()
-                        return result['data']['getQuests']
-            except (Exception, ClientResponseError) as e:
-                if attempt < retries - 1:
-                    await asyncio.sleep(5)
-                    continue
-                
-                return None
-                
-    async def claim_social_tasks(self, token: str, task_name: str, proxy=None, retries=5):
-        url = "https://prod.haha.me/wallet-api/graphql"
-        data = json.dumps({
-            "operationName": "claimQuestEx",
-            "variables": {
-                "questName": task_name
-            },
-            "query": "mutation claimQuestEx($questName: String!) {\n  claimQuestEx(questName: $questName) {\n    success\n    message\n    __typename\n  }\n}"
-        })
-        
-        headers = {
-            **self.headers,
-            "Authorization": token,
-            "Content-Length": str(len(data))
-        }
-        for attempt in range(retries):
-            connector = ProxyConnector.from_url(proxy) if proxy else None
-            try:
-                async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.post(url=url, headers=headers, data=data) as response:
-                        response.raise_for_status()
-                        result = await response.json()
-                        return result['data']['claimQuestEx']
-            except (Exception, ClientResponseError) as e:
-                if attempt < retries - 1:
-                    await asyncio.sleep(5)
-                    continue
-                
-                return None
-            
-    async def get_id_token(self, email: str, password: str, use_proxy: bool):
-        proxy = self.get_next_proxy_for_account(email) if use_proxy else None
-
-        token = None
-        while token is None:
-            token = await self.user_login(email, password, proxy)
-            if not token:
-                proxy = self.rotate_proxy_for_account(email) if use_proxy else None
-                continue
-            
-            self.log(
-                f"{Fore.CYAN+Style.BRIGHT}Status    :{Style.RESET_ALL}"
-                f"{Fore.GREEN+Style.BRIGHT} Login Success {Style.RESET_ALL}"
-            )
-            return token
-        
-    async def process_accounts(self, email: str, password: str, use_proxy: bool):
-        token = await self.get_id_token(email, password, use_proxy)
-
-        proxy = self.get_next_proxy_for_account(email) if use_proxy else None
-
-        self.log(
-            f"{Fore.CYAN+Style.BRIGHT}Proxy     :{Style.RESET_ALL}"
-            f"{Fore.WHITE+Style.BRIGHT} {proxy} {Style.RESET_ALL}"
-        )
-
-        balance = "N/A"
-
-        user = await self.user_balance(token, proxy)
-        if user:
-            balance = user["getKarmaPoints"]
-            
-        self.log(
-            f"{Fore.CYAN+Style.BRIGHT}Balance   :{Style.RESET_ALL}"
-            f"{Fore.WHITE+Style.BRIGHT} {balance} Karma {Style.RESET_ALL}"
-        )
-        
-        check_in = await self.daily_checkin(token, proxy)
-        if not check_in:
-            self.log(
-                f"{Fore.CYAN+Style.BRIGHT}Check-In  :{Style.RESET_ALL}"
-                f"{Fore.RED+Style.BRIGHT} GET Data Failed {Style.RESET_ALL}"
-            )
+        # Login
+        token = await self.user_login(email, pwd, proxy)
+        if not token:
+            self.log(f"{Fore.RED}{masked_email} - Login failed")
             return
-        
-        is_claimable = check_in['getDailyCheckIn']
 
-        if is_claimable:
-            claim = await self.claim_checkin(token, proxy)
-            
-            if claim:
+        self.log(f"{Fore.GREEN}{masked_email} - Login success")
+        self.log(f"{Fore.CYAN}Using proxy: {proxy or 'None'}")
 
-                balance = "N/A"
-                user = await self.user_balance(token, proxy)
-                if user:
-                    balance = user["getKarmaPoints"]
+        # Get balance
+        balance = await self.get_balance(token, proxy)
+        self.log(f"{Fore.CYAN}Balance: {Fore.WHITE}{balance} Karma")
 
-                self.log(
-                    f"{Fore.CYAN+Style.BRIGHT}Check-In  :{Style.RESET_ALL}"
-                    f"{Fore.GREEN+Style.BRIGHT} Is Claimed {Style.RESET_ALL}"
-                    f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
-                    f"{Fore.CYAN+Style.BRIGHT} Balance {Style.RESET_ALL}"
-                    f"{Fore.WHITE+Style.BRIGHT}{balance} Karma{Style.RESET_ALL}"
-                )
-            else:
-                self.log(
-                    f"{Fore.CYAN+Style.BRIGHT}Check-In  :{Style.RESET_ALL}"
-                    f"{Fore.RED+Style.BRIGHT} Isn't Claimed {Style.RESET_ALL}"
-                )
+        # Handle checkin
+        checkin_result = await self.handle_checkin(token, proxy)
+        if checkin_result is None:
+            self.log(f"{Fore.RED}Checkin status check failed")
+        elif checkin_result:
+            new_balance = await self.get_balance(token, proxy)
+            self.log(f"{Fore.GREEN}Checkin claimed! New balance: {new_balance}")
         else:
-            self.log(
-                f"{Fore.CYAN+Style.BRIGHT}Check-In  :{Style.RESET_ALL}"
-                f"{Fore.YELLOW+Style.BRIGHT} Is Already Claimed {Style.RESET_ALL}"
-            )
+            self.log(f"{Fore.YELLOW}Already checked in today")
 
-        self.log(f"{Fore.CYAN+Style.BRIGHT}Task Lists:{Style.RESET_ALL}")
+        # Add task claiming logic here...
 
-        basic_tasks = await self.basic_task_lists(token, proxy)
-        if basic_tasks:
-            self.log(f"{Fore.BLUE+Style.BRIGHT}   > Basic Tasks{Style.RESET_ALL}")
-
-            for task in basic_tasks:
-                if task:
-                    task_id = task['task_id']
-                    title = task['name']
-                    reward = task['karma_available']
-                    is_completed = task['completed']
-                    is_paid = task['karma_paid']
-                    today_tx = task['today_transactions']
-
-                    if is_completed and is_paid:
-                        self.log(
-                            f"{Fore.CYAN+Style.BRIGHT}      > {Style.RESET_ALL}"
-                            f"{Fore.WHITE+Style.BRIGHT}{title}{Style.RESET_ALL}"
-                            f"{Fore.YELLOW+Style.BRIGHT} Already Completed {Style.RESET_ALL}"
-                        )
-                        continue
-
-                    if task_id == 14:
-                        count = 10
-                        if today_tx is None:
-                            today_tx = 0
-                            count = 10 - today_tx
-                        else:
-                            count = 10 - today_tx
-
-                        for _ in range(count):
-                            claim = await self.claim_basic_tasks(token, task_id, proxy)
-                            if claim:
-                                self.log(
-                                    f"{Fore.CYAN+Style.BRIGHT}      > {Style.RESET_ALL}"
-                                    f"{Fore.WHITE+Style.BRIGHT}{title}{Style.RESET_ALL}"
-                                    f"{Fore.GREEN+Style.BRIGHT} IS Completed {Style.RESET_ALL}"
-                                    f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
-                                    f"{Fore.CYAN+Style.BRIGHT} Reward {Style.RESET_ALL}"
-                                    f"{Fore.WHITE+Style.BRIGHT}{reward} Karma{Style.RESET_ALL}"
-                                )
-                            else:
-                                self.log(
-                                    f"{Fore.CYAN+Style.BRIGHT}      > {Style.RESET_ALL}"
-                                    f"{Fore.WHITE+Style.BRIGHT}{title}{Style.RESET_ALL}"
-                                    f"{Fore.RED+Style.BRIGHT} Not Completed {Style.RESET_ALL}"
-                                )
-                                break
-
-                            await asyncio.sleep(1)
-
-                    else:
-                        claim = await self.claim_basic_tasks(token, task_id, proxy)
-                        if claim:
-                            self.log(
-                                f"{Fore.CYAN+Style.BRIGHT}      > {Style.RESET_ALL}"
-                                f"{Fore.WHITE+Style.BRIGHT}{title}{Style.RESET_ALL}"
-                                f"{Fore.GREEN+Style.BRIGHT} IS Completed {Style.RESET_ALL}"
-                                f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
-                                f"{Fore.CYAN+Style.BRIGHT} Reward {Style.RESET_ALL}"
-                                f"{Fore.WHITE+Style.BRIGHT}{reward} Karma{Style.RESET_ALL}"
-                            )
-                        else:
-                            self.log(
-                                f"{Fore.CYAN+Style.BRIGHT}      > {Style.RESET_ALL}"
-                                f"{Fore.WHITE+Style.BRIGHT}{title}{Style.RESET_ALL}"
-                                f"{Fore.RED+Style.BRIGHT} Not Completed {Style.RESET_ALL}"
-                            )
-                    await asyncio.sleep(1)
-        else:
-            self.log(
-                f"{Fore.BLUE+Style.BRIGHT}   > Basic Tasks{Style.RESET_ALL}"
-                f"{Fore.RED+Style.BRIGHT} Data Is None {Style.RESET_ALL}"
-            )
-
-        social_tasks = await self.social_task_lists(token, proxy)
-        if social_tasks:
-            self.log(f"{Fore.BLUE+Style.BRIGHT}   > Social Tasks{Style.RESET_ALL}")
-
-            for task in social_tasks:
-                if task:
-                    task_name = task['name']
-                    title = task['description']
-                    reward = task['karma_reward']
-                    status = task['status']
-
-                    if status == reward:
-                        self.log(
-                            f"{Fore.CYAN+Style.BRIGHT}      > {Style.RESET_ALL}"
-                            f"{Fore.WHITE+Style.BRIGHT}{title}{Style.RESET_ALL}"
-                            f"{Fore.YELLOW+Style.BRIGHT} Already Completed {Style.RESET_ALL}"
-                        )
-                        continue
-
-                    claim = await self.claim_social_tasks(token, task_name, proxy)
-                    if claim:
-                        self.log(
-                            f"{Fore.CYAN+Style.BRIGHT}      > {Style.RESET_ALL}"
-                            f"{Fore.WHITE+Style.BRIGHT}{title}{Style.RESET_ALL}"
-                            f"{Fore.GREEN+Style.BRIGHT} IS Completed {Style.RESET_ALL}"
-                            f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
-                            f"{Fore.CYAN+Style.BRIGHT} Reward {Style.RESET_ALL}"
-                            f"{Fore.WHITE+Style.BRIGHT}{reward} Karma{Style.RESET_ALL}"
-                        )
-                    else:
-                        self.log(
-                            f"{Fore.CYAN+Style.BRIGHT}      > {Style.RESET_ALL}"
-                            f"{Fore.WHITE+Style.BRIGHT}{title}{Style.RESET_ALL}"
-                            f"{Fore.RED+Style.BRIGHT} Not Completed {Style.RESET_ALL}"
-                        )
-                    await asyncio.sleep(1)
-        else:
-            self.log(
-                f"{Fore.BLUE+Style.BRIGHT}   > Social Tasks{Style.RESET_ALL}"
-                f"{Fore.RED+Style.BRIGHT} Data Is None {Style.RESET_ALL}"
-            )
-    
     async def main(self):
-        try:
-            accounts = self.load_accounts()
-            if not accounts:
-                self.log(f"{Fore.RED}No Accounts Loaded.{Style.RESET_ALL}")
-                return
+        accounts = self.load_accounts()
+        if not accounts:
+            return
 
-            use_proxy_choice = self.print_question()
-
-            while True:
-                use_proxy = False
-                if use_proxy_choice in [1, 2]:
-                    use_proxy = True
-
-                self.clear_terminal()
-                self.welcome()
-                self.log(
-                    f"{Fore.GREEN + Style.BRIGHT}Account's Total: {Style.RESET_ALL}"
-                    f"{Fore.WHITE + Style.BRIGHT}{len(accounts)}{Style.RESET_ALL}"
-                )
-
-                if use_proxy:
-                    await self.load_proxies(use_proxy_choice)
+        print("1. Use Monosans proxies\n2. Use local proxies\n3. No proxies")
+        choice = int(input("Select: ").strip())
+        use_proxy = choice in (1, 2)
         
-                separator = "=" * 15
-                for account in accounts:
-                    if account:
-                        email = account.get('Email')
-                        password = account.get('Password')
+        if use_proxy:
+            await self.load_proxies(choice)
 
-                        if "@" in email and password:
-                            self.log(
-                                f"{Fore.CYAN + Style.BRIGHT}{separator}[{Style.RESET_ALL}"
-                                f"{Fore.WHITE + Style.BRIGHT} {self.mask_account(email)} {Style.RESET_ALL}"
-                                f"{Fore.CYAN + Style.BRIGHT}]{separator}{Style.RESET_ALL}"
-                            )
-                            await self.process_accounts(email, password, use_proxy)
-                            await asyncio.sleep(3)
-
-                self.log(f"{Fore.CYAN + Style.BRIGHT}={Style.RESET_ALL}"*53)
-                seconds = 12 * 60 * 60
-                while seconds > 0:
-                    formatted_time = self.format_seconds(seconds)
-                    print(
-                        f"{Fore.CYAN+Style.BRIGHT}[ Wait for{Style.RESET_ALL}"
-                        f"{Fore.WHITE+Style.BRIGHT} {formatted_time} {Style.RESET_ALL}"
-                        f"{Fore.CYAN+Style.BRIGHT}... ]{Style.RESET_ALL}"
-                        f"{Fore.WHITE+Style.BRIGHT} | {Style.RESET_ALL}"
-                        f"{Fore.BLUE+Style.BRIGHT}All Accounts Have Been Processed...{Style.RESET_ALL}",
-                        end="\r"
+        while True:
+            self.clear_terminal()
+            self.welcome()
+            
+            tasks = []
+            for acc in accounts:
+                tasks.append(
+                    self.process_account(
+                        acc['Email'],
+                        acc['Password'],
+                        use_proxy
                     )
-                    await asyncio.sleep(1)
-                    seconds -= 1
-
-        except Exception as e:
-            self.log(f"{Fore.RED+Style.BRIGHT}Error: {e}{Style.RESET_ALL}")
+                )
+            
+            await asyncio.gather(*tasks)
+            
+            self.log(f"{Fore.CYAN}Cycle completed. Restarting in 12 hours...")
+            await asyncio.sleep(12 * 3600)
 
 if __name__ == "__main__":
     try:
-        bot = HahaWallet()
-        asyncio.run(bot.main())
+        asyncio.run(HahaWallet().main())
     except KeyboardInterrupt:
-        print(
-            f"{Fore.CYAN + Style.BRIGHT}[ {datetime.now().astimezone(wib).strftime('%x %X %Z')} ]{Style.RESET_ALL}"
-            f"{Fore.WHITE + Style.BRIGHT} | {Style.RESET_ALL}"
-            f"{Fore.RED + Style.BRIGHT}[ EXIT ] Haha Wallet - BOT{Style.RESET_ALL}                                       "                              
-        )
+        print(f"\n{Fore.RED}Exited")
